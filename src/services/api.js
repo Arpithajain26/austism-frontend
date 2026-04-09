@@ -8,7 +8,8 @@ const req = async (method, path, body) => {
   const token = localStorage.getItem('auth_token');
   if (token) opts.headers['Authorization'] = `Bearer ${token}`;
   if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(`${BASE}${path}`, opts);
+  const cleanBase = BASE.endsWith('/') ? BASE.slice(0, -1) : BASE;
+  const res = await fetch(`${cleanBase}${path}`, opts);
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Request failed');
   return data;
