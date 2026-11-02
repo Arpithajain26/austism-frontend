@@ -1,19 +1,35 @@
-import React, { useState, useEffect } from 'react';
-import AuthPage from './pages/AuthPage';
-import ParentDashboard from './pages/ParentDashboard';
-import ChildDashboard from './pages/ChildDashboard';
-import TherapistDashboard from './pages/TherapistDashboard';
-import Activities from './pages/Activities';
+import React, { useState, useEffect } from "react";
 
-// ── Simple SPA router ─────────────────────────────────────────────────────────
+import Home from "./pages/Home";
+import AuthPage from "./pages/AuthPage";
+import ParentDashboard from "./pages/ParentDashboard";
+import ChildDashboard from "./pages/ChildDashboard";
+import TherapistDashboard from "./pages/TherapistDashboard";
+import Activities from "./pages/Activities";
+import Games from "./pages/Games";
+import TherapeuticGames from "./pages/TherapeuticGames";
+import AboutAutism from "./pages/AboutAutism";
+import Contact from "./pages/Contact";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
+import ProgressView from "./pages/ProgressView";
+import ExamPage from "./pages/ExamPage";
+import MasteryExamPage from "./pages/MasteryExamPage";
+import TherapyTrophyRoom from "./pages/TherapyTrophyRoom";
+import Chatbot from "./components/Chatbot";
+import ThemeToggle from "./components/ThemeToggle";
+
+// ─────────────────────────────────────────────────────────────
+// Simple SPA Router
+// ─────────────────────────────────────────────────────────────
 function navigate(path) {
-  window.history.pushState({}, '', path);
-  window.dispatchEvent(new PopStateEvent('popstate'));
+  window.history.pushState({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function getStoredUser() {
   try {
-    const user = localStorage.getItem('auth_user');
+    const user = localStorage.getItem("auth_user");
     return user ? JSON.parse(user) : null;
   } catch {
     return null;
@@ -26,27 +42,46 @@ function App() {
 
   useEffect(() => {
     const onNavChange = () => setPath(window.location.pathname);
-    window.addEventListener('popstate', onNavChange);
-    return () => window.removeEventListener('popstate', onNavChange);
+    window.addEventListener("popstate", onNavChange);
+    return () => window.removeEventListener("popstate", onNavChange);
   }, []);
 
-  // Sync user state on login/logout
+  // Verify token on mount if user exists
+  useEffect(() => {
+    if (user) {
+      import("./services/api").then(({ getMe }) => {
+        getMe().catch((err) => {
+          const msg = err.message || "";
+          if (msg.includes("Invalid") || msg.includes("token") || msg.includes("not found")) {
+            handleLogout();
+          }
+        });
+      });
+    }
+  }, []);
+
   const handleLogin = (userData) => {
     setUser(userData);
-    navigate('/dashboard');
+    navigate("/dashboard");
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('auth_user');
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("auth_user");
     setUser(null);
-    navigate('/');
+    navigate("/");
   };
 
-  // Protected route logic
   useEffect(() => {
-    if (!user && path !== '/') {
-      navigate('/');
+    if (!user) {
+      const publicRoutes = ["/", "/login", "/about", "/contact", "/privacy", "/terms", "/exam", "/exam/result", "/challenge-mode", "/mastery-exam", "/challenge"];
+      if (!publicRoutes.includes(path)) {
+        navigate("/");
+      }
+    } else {
+      if (path === "/login") {
+        navigate("/dashboard");
+      }
     }
   }, [path, user]);
 
@@ -56,117 +91,281 @@ function App() {
   };
 
   let Component;
-  if (!user) {
-    Component = <AuthPage onLogin={handleLogin} />;
-  } else {
+
+  // ============================================================
+  // PUBLIC / DEMO ROUTES
+  // ============================================================
+  if (path === "/challenge-mode" || path === "/mastery-exam" || path === "/challenge") {
+    Component = <MasteryExamPage />;
+  } else if (path === "/exam") {
+    Component = <ExamPage />;
+  } else if (path === "/exam/result") {
+    Component = <ExamPage initialStep="result" />;
+  } else if (!user) {
     switch (path) {
-      case '/dashboard':
-        if (user.role === 'parent') Component = <ParentDashboard user={user} />;
-        else if (user.role === 'therapist') Component = <TherapistDashboard user={user} />;
-        else Component = <ChildDashboard user={user} />;
+      case "/":
+        Component = <Home />;
         break;
-      case '/activities':
-        Component = <Activities user={user} />;
+
+      case "/login":
+        Component = <AuthPage onLogin={handleLogin} />;
         break;
-      case '/':
-        // If logged in and on root, go to dashboard
-        Component = user.role === 'parent' ? <ParentDashboard user={user} /> :
-                    user.role === 'therapist' ? <TherapistDashboard user={user} /> :
-                    <ChildDashboard user={user} />;
+
+      case "/about":
+        Component = <AboutAutism />;
         break;
+
+      case "/contact":
+        Component = <Contact />;
+        break;
+
+      case "/privacy":
+        Component = <PrivacyPolicy />;
+        break;
+
+      case "/terms":
+        Component = <TermsOfService />;
+        break;
+
       default:
-        Component = <div style={{textAlign:'center', padding:'100px'}}><h2>404 - Page Not Found</h2><button onClick={()=>navigate('/dashboard')} className="btn btn-primary">Go to Dashboard</button></div>;
+        Component = <Home />;
+    }
+  }
+  // ============================================================
+  // PRIVATE ROUTES
+  // ============================================================
+  else {
+    if (path.startsWith("/child/")) {
+      const childId = path.split("/child/")[1];
+      Component = <ChildDashboard user={user} childId={childId} onNavigate={navigate} />;
+    } else if (path.startsWith("/progress/")) {
+      const childId = path.split("/progress/")[1];
+      Component = <ProgressView user={user} childId={childId} onNavigate={navigate} />;
+    } else if (path.startsWith("/trophy-room/")) {
+      const childId = path.split("/trophy-room/")[1];
+      Component = <TherapyTrophyRoom user={user} childId={childId} onNavigate={navigate} />;
+    } else if (path === "/trophy-room") {
+      Component = <TherapyTrophyRoom user={user} onNavigate={navigate} />;
+    } else {
+      switch (path) {
+        case "/dashboard":
+        case "/":
+          if (user.role === "parent") {
+            Component = <ParentDashboard user={user} onNavigate={navigate} />;
+          } else if (user.role === "therapist") {
+            Component = <TherapistDashboard user={user} onNavigate={navigate} />;
+          } else {
+            Component = <ChildDashboard user={user} onNavigate={navigate} />;
+          }
+          break;
+
+        case "/activities":
+          Component = <Activities user={user} />;
+          break;
+
+        case "/games":
+          Component = <Games user={user} />;
+          break;
+
+        case "/therapeutic-games":
+          Component = <TherapeuticGames user={user} />;
+          break;
+
+        default:
+          Component = (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "100px",
+              }}
+            >
+              <h2>404 - Page Not Found</h2>
+              <button
+                onClick={() => navigate("/dashboard")}
+                className="btn btn-primary"
+                style={{ marginTop: "16px" }}
+              >
+                Go to Dashboard
+              </button>
+            </div>
+          );
+      }
     }
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-
-      {/* ── Navigation ── */}
-      <nav className="glass" style={{
-        margin: '16px auto',
-        padding: '12px 28px',
-        display: 'flex',
-        gap: '20px',
-        alignItems: 'center',
-        width: 'max-content',
-        maxWidth: 'calc(100vw - 40px)',
-        position: 'sticky',
-        top: '16px',
-        zIndex: 100,
-      }}>
-        {/* Brand */}
-        <a
-          href="/"
-          onClick={(e) => handleNavClick(e, user ? '/dashboard' : '/')}
-          style={{ textDecoration: 'none', fontWeight: '800', fontSize: '1.2rem', color: 'var(--primary)', display:'flex', alignItems:'center', gap:'8px' }}
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* Show navbar only after login */}
+      {user && (
+        <nav
+          className="glass"
+          style={{
+            margin: "16px auto",
+            padding: "12px 28px",
+            display: "flex",
+            gap: "20px",
+            alignItems: "center",
+            width: "max-content",
+            maxWidth: "calc(100vw - 40px)",
+            position: "sticky",
+            top: "16px",
+            zIndex: 100,
+          }}
         >
-          🧩 <span style={{letterSpacing:'-0.5px'}}>AutismAssist</span>
-        </a>
+          <a
+            href="/dashboard"
+            onClick={(e) => handleNavClick(e, "/dashboard")}
+            style={{
+              textDecoration: "none",
+              fontWeight: "800",
+              fontSize: "1.2rem",
+              color: "var(--primary)",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            🧩 AutismAssist
+          </a>
 
-        {user && (
-          <>
-            <div style={{width:'1px', height:'20px', background:'var(--border)'}} />
-            
-            <a
-              href="/dashboard"
-              onClick={(e) => handleNavClick(e, '/dashboard')}
-              style={{
-                textDecoration: 'none',
-                color: path === '/dashboard' || path === '/' ? 'var(--primary)' : 'var(--text)',
-                fontWeight: '600',
-                fontSize: '0.95rem'
-              }}
-            >
-              Dashboard
-            </a>
-            
-            <a
-              href="/activities"
-              onClick={(e) => handleNavClick(e, '/activities')}
-              style={{
-                textDecoration: 'none',
-                color: path === '/activities' ? 'var(--primary)' : 'var(--text)',
-                fontWeight: '600',
-                fontSize: '0.95rem'
-              }}
-            >
-              Library
-            </a>
+          <div
+            style={{
+              width: "1px",
+              height: "20px",
+              background: "var(--border)",
+            }}
+          />
 
-            <div style={{width:'1px', height:'20px', background:'var(--border)'}} />
+          <a
+            href="/dashboard"
+            onClick={(e) => handleNavClick(e, "/dashboard")}
+            style={{
+              textDecoration: "none",
+              color: path === "/dashboard" || path === "/" ? "var(--primary)" : "var(--text)",
+              fontWeight: "600",
+            }}
+          >
+            Dashboard
+          </a>
 
-            <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
-              <span className={`badge badge-${user.role}`} style={{fontSize:'0.7rem'}}>{user.role}</span>
-              <button 
-                onClick={handleLogout}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--red)',
-                  fontWeight: '600',
-                  fontSize: '0.9rem',
-                  cursor: 'pointer',
-                  padding: '4px 8px',
-                  borderRadius: '6px'
-                }}
-              >
-                Logout
-              </button>
-            </div>
-          </>
-        )}
-      </nav>
+          <a
+            href="/activities"
+            onClick={(e) => handleNavClick(e, "/activities")}
+            style={{
+              textDecoration: "none",
+              color: path === "/activities" ? "var(--primary)" : "var(--text)",
+              fontWeight: "600",
+            }}
+          >
+            Activities
+          </a>
 
-      {/* ── Page Content ── */}
-      <main style={{ flex: 1, padding: '20px', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+          <a
+            href="/games"
+            onClick={(e) => handleNavClick(e, "/games")}
+            style={{
+              textDecoration: "none",
+              color: path === "/games" ? "var(--primary)" : "var(--text)",
+              fontWeight: "600",
+            }}
+          >
+            Games
+          </a>
+
+          <a
+            href="/therapeutic-games"
+            onClick={(e) => handleNavClick(e, "/therapeutic-games")}
+            style={{
+              textDecoration: "none",
+              color: path === "/therapeutic-games" ? "var(--primary)" : "var(--text)",
+              fontWeight: "600",
+            }}
+          >
+            🧩 Therapy Games
+          </a>
+
+          <a
+            href="/trophy-room"
+            onClick={(e) => handleNavClick(e, "/trophy-room")}
+            style={{
+              textDecoration: "none",
+              color: path === "/trophy-room" || path.startsWith("/trophy-room/") ? "#ca8a04" : "var(--text)",
+              fontWeight: "700",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            🏆 Trophy Room
+          </a>
+
+          <div
+            style={{
+              width: "1px",
+              height: "20px",
+              background: "var(--border)",
+            }}
+          />
+
+          <span className={`badge badge-${user.role}`}>{user.role}</span>
+
+          <ThemeToggle />
+
+          <button
+            onClick={handleLogout}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--red)",
+              cursor: "pointer",
+              fontWeight: "600",
+            }}
+          >
+            Logout
+          </button>
+        </nav>
+      )}
+
+      <main
+        style={{
+          flex: 1,
+          width: "100%",
+          maxWidth: (path === "/" || !user) ? "none" : "1200px",
+          margin: (path === "/" || !user) ? "0" : "0 auto",
+          padding: (path === "/" || !user) ? "0" : "20px",
+        }}
+      >
         {Component}
       </main>
 
-      {/* ── Footer ── */}
-      <footer style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-        © 2026 Autism Assistant Pro · Empowering every journey. 🌟
-      </footer>
+      {user && (
+        <footer
+          style={{
+            textAlign: "center",
+            padding: "40px",
+            color: "var(--text-muted)",
+            fontSize: ".85rem",
+          }}
+        >
+          © 2026 Autism Assistant · Empowering every journey 🌟
+        </footer>
+      )}
+
+      {/* Floating Theme Switcher if top navbar isn't rendered */}
+      {!user && (path.includes("exam") || path === "/login") && (
+        <div style={{ position: "fixed", bottom: "24px", left: "24px", zIndex: 999 }}>
+          <ThemeToggle showLabel={true} />
+        </div>
+      )}
+
+      {/* Global AI Clinical Autism Chatbot */}
+      <Chatbot />
     </div>
   );
 }

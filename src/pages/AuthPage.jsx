@@ -1,193 +1,1810 @@
-import React, { useState } from 'react';
-import { registerUser, loginUser } from '../services/api';
+import React, { useState, useEffect } from "react";
+import {
+  googleLogin,
+  firebaseSync,
+  registerUser,
+  loginUser,
+} from "../services/api";
+import { useLang } from "../context/LanguageContext";
+import { auth } from "../firebase";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  updateProfile,
+  signOut,
+} from "firebase/auth";
 
-const ROLES = [
-  { value: 'parent',    label: 'Parent',    icon: '👨‍👩‍👧', desc: 'Monitor your child\'s progress and manage activities' },
-  { value: 'therapist', label: 'Therapist', icon: '👩‍⚕️', desc: 'Manage multiple children and assign therapy tasks' },
-  { value: 'child',     label: 'Child',     icon: '🧒',   desc: 'Complete fun activities and track your achievements' },
-];
+function navigate(path) {
+  window.history.pushState({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
 
-const AuthPage = ({ onLogin }) => {
-  const [mode, setMode] = useState('login');        // 'login' | 'register'
-  const [role, setRole] = useState('');
-  const [step, setStep] = useState(1);             // register step 1=role, 2=form
-  const [form, setForm] = useState({ name: '', email: '', password: '', age: '', parentEmail: '', specialization: '' });
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+/* ─── Reusable input ──────────────────────────────────────────────────────── */
+const Field = ({
+  label,
+  id,
+  type = "text",
+  placeholder,
+  value,
+  onChange,
+  required,
+  minLength,
+  children,
+}) => (
+  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+    <label
+      htmlFor={id}
+      style={{
+        fontSize: "0.82rem",
+        fontWeight: "600",
+        color: "#374151",
+        letterSpacing: "0.02em",
+      }}
+    >
+      {label}
+    </label>
+    {children || (
+      <input
+        id={id}
+        type={type}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        required={required}
+        minLength={minLength}
+        style={{
+          padding: "10px 14px",
+          borderRadius: "10px",
+          border: "1.5px solid #e5e7eb",
+          fontSize: "0.93rem",
+          fontFamily: "inherit",
+          outline: "none",
+          transition: "border-color 0.2s",
+          background: "#fafafa",
+          color: "#111827",
+        }}
+        onFocus={(e) => (e.target.style.borderColor = "#7c3aed")}
+        onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")}
+      />
+    )}
+  </div>
+);
 
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError(''); setLoading(true);
-    try {
-      const data = await loginUser(form.email, form.password);
-      localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('auth_user', JSON.stringify(data.user));
-      onLogin(data.user);
-    } catch (err) { setError(err.message); }
-    finally { setLoading(false); }
-  };
-
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setError(''); setLoading(true);
-    try {
-      const payload = { role, name: form.name, email: form.email, password: form.password };
-      if (role === 'child') { payload.age = form.age; payload.parentEmail = form.parentEmail; }
-      if (role === 'therapist') { payload.specialization = form.specialization; }
-      const data = await registerUser(payload);
-      localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('auth_user', JSON.stringify(data.user));
-      onLogin(data.user);
-    } catch (err) { setError(err.message); }
-    finally { setLoading(false); }
-  };
-
-  const resetToLogin = () => { setMode('login'); setStep(1); setRole(''); setError(''); setForm({ name:'',email:'',password:'',age:'',parentEmail:'',specialization:'' }); };
+/* ─── Left panel content per mode ─────────────────────────────────────────── */
+const LeftPanel = ({ mode, STATS }) => {
+  const { t } = useLang();
 
   return (
-    <div className="fade-in" style={{ display:'flex', justifyContent:'center', alignItems:'center', minHeight:'80vh', padding:'20px' }}>
-      <div style={{ width:'100%', maxWidth:'460px' }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        padding: "50px",
+        background:
+          "linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #6366f1 100%)",
+        color: "white",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {/* Decorative circles */}
+      <div
+        style={{
+          position: "absolute",
+          top: "-80px",
+          right: "-80px",
+          width: "300px",
+          height: "300px",
+          borderRadius: "50%",
+          background: "rgba(255,255,255,0.06)",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          bottom: "-60px",
+          left: "-60px",
+          width: "250px",
+          height: "250px",
+          borderRadius: "50%",
+          background: "rgba(255,255,255,0.06)",
+        }}
+      />
 
-        {/* Brand */}
-        <div style={{ textAlign:'center', marginBottom:'32px' }}>
-          <div style={{ fontSize:'3rem', marginBottom:'8px' }}>🧩</div>
-          <h1 style={{ fontSize:'2rem', fontWeight:'800', color:'var(--primary)' }}>AutismAssist</h1>
-          <p style={{ color:'var(--text-muted)', fontSize:'0.95rem', marginTop:'4px' }}>Home-based therapy, powered by care</p>
+      <div style={{ position: "relative", zIndex: 1 }}>
+        {/* Logo */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            marginBottom: "40px",
+          }}
+        >
+          <span style={{ fontSize: "2rem" }}>🧩</span>
+          <span
+            style={{
+              fontWeight: "800",
+              fontSize: "1.4rem",
+              letterSpacing: "-0.02em",
+            }}
+          >
+            AutismAssist
+          </span>
         </div>
 
-        <div className="card">
-          {/* Tabs */}
-          <div style={{ display:'flex', background:'#f3f4f6', borderRadius:'10px', padding:'4px', marginBottom:'24px' }}>
-            {['login','register'].map(m => (
-              <button key={m} onClick={() => { setMode(m); setStep(1); setError(''); }} style={{
-                flex:1, padding:'9px', border:'none', borderRadius:'8px', fontFamily:'inherit',
-                fontWeight:'600', fontSize:'0.9rem', cursor:'pointer', transition:'all 0.2s',
-                background: mode===m ? 'white' : 'transparent',
-                color: mode===m ? 'var(--primary)' : 'var(--text-muted)',
-                boxShadow: mode===m ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
-              }}>
-                {m === 'login' ? '🔑 Sign In' : '✨ Register'}
-              </button>
-            ))}
-          </div>
+        {/* Dynamic Heading based on mode */}
+        {mode === "login" ? (
+          <>
+            <h2
+              style={{
+                fontSize: "2rem",
+                fontWeight: "800",
+                lineHeight: 1.2,
+                marginBottom: "16px",
+              }}
+            >
+              Welcome back to your therapy hub
+            </h2>
+            <p
+              style={{
+                fontSize: "0.98rem",
+                opacity: 0.88,
+                lineHeight: 1.6,
+                marginBottom: "36px",
+              }}
+            >
+              Sign in to view today’s tailored activities, track emotion
+              metrics, and review your child’s weekly progress.
+            </p>
+          </>
+        ) : (
+          <>
+            <h2
+              style={{
+                fontSize: "2rem",
+                fontWeight: "800",
+                lineHeight: 1.2,
+                marginBottom: "16px",
+              }}
+            >
+              Start your child’s personalized journey
+            </h2>
+            <p
+              style={{
+                fontSize: "0.98rem",
+                opacity: 0.88,
+                lineHeight: 1.6,
+                marginBottom: "36px",
+              }}
+            >
+              Create an account to access AI-driven autism assessment,
+              customized therapy activities, and progress reporting.
+            </p>
+          </>
+        )}
 
-          {error && <div className="alert alert-error" style={{ marginBottom:'16px' }}>{error}</div>}
+        {/* Feature list */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "14px",
+            marginBottom: "44px",
+          }}
+        >
+          {[
+            "90% accurate autism level classification",
+            "Real-time emotion detection during sessions",
+            "Weekly AI-generated progress reports",
+          ].map((item, idx) => (
+            <div
+              key={idx}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                fontSize: "0.9rem",
+                opacity: 0.95,
+              }}
+            >
+              <span
+                style={{
+                  width: "22px",
+                  height: "22px",
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.2)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.75rem",
+                  fontWeight: "800",
+                }}
+              >
+                ✓
+              </span>
+              {item}
+            </div>
+          ))}
+        </div>
 
-          {/* ── LOGIN ─────────────────────────────────────────── */}
-          {mode === 'login' && (
-            <>
-              <div className="alert alert-info" style={{ marginBottom:'20px', fontSize:'0.82rem' }}>
-                <strong>Demo accounts:</strong><br/>
-                👨‍👩‍👧 parent@example.com &nbsp;|&nbsp; 👩‍⚕️ therapist@example.com &nbsp;|&nbsp; 🧒 child@example.com<br/>
-                <em>Password: password123 (all accounts)</em>
+        {/* Stats strip */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: "12px",
+            paddingTop: "28px",
+            borderTop: "1px solid rgba(255,255,255,0.2)",
+          }}
+        >
+          {STATS.map((s, i) => (
+            <div key={i}>
+              <div style={{ fontWeight: "800", fontSize: "1.3rem" }}>
+                {s.value}
               </div>
-              <form onSubmit={handleLogin} style={{ display:'flex', flexDirection:'column', gap:'16px' }}>
-                <div>
-                  <label className="label">Email Address</label>
-                  <input id="login-email" className="input" type="email" placeholder="your@email.com"
-                    value={form.email} onChange={e => set('email', e.target.value)} required />
-                </div>
-                <div>
-                  <label className="label">Password</label>
-                  <input id="login-password" className="input" type="password" placeholder="••••••••"
-                    value={form.password} onChange={e => set('password', e.target.value)} required />
-                </div>
-                <button id="login-submit" type="submit" className="btn btn-primary" style={{ width:'100%', justifyContent:'center' }} disabled={loading}>
-                  {loading ? <><span className="spinner" style={{ width:18,height:18 }} /> Signing in...</> : 'Sign In →'}
-                </button>
-              </form>
-            </>
-          )}
-
-          {/* ── REGISTER Step 1: Role ──────────────────────────── */}
-          {mode === 'register' && step === 1 && (
-            <div>
-              <h3 style={{ fontWeight:'700', marginBottom:'4px' }}>I am a...</h3>
-              <p style={{ color:'var(--text-muted)', fontSize:'0.9rem', marginBottom:'20px' }}>Choose your account type</p>
-              <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
-                {ROLES.map(r => (
-                  <button key={r.value} onClick={() => { setRole(r.value); setStep(2); }}
-                    style={{
-                      display:'flex', alignItems:'center', gap:'16px', padding:'16px',
-                      borderRadius:'10px', border: `2px solid ${role===r.value ? 'var(--primary)' : 'var(--border)'}`,
-                      background: role===r.value ? 'var(--primary-light)' : 'white',
-                      cursor:'pointer', textAlign:'left', fontFamily:'inherit', transition:'all 0.2s',
-                    }}>
-                    <span style={{ fontSize:'2rem' }}>{r.icon}</span>
-                    <div>
-                      <div style={{ fontWeight:'700', color:'var(--text)' }}>{r.label}</div>
-                      <div style={{ fontSize:'0.82rem', color:'var(--text-muted)' }}>{r.desc}</div>
-                    </div>
-                  </button>
-                ))}
+              <div
+                style={{ fontSize: "0.75rem", opacity: 0.78, marginTop: "2px" }}
+              >
+                {s.label}
               </div>
             </div>
-          )}
-
-          {/* ── REGISTER Step 2: Form ──────────────────────────── */}
-          {mode === 'register' && step === 2 && (
-            <form onSubmit={handleRegister} style={{ display:'flex', flexDirection:'column', gap:'16px' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'4px' }}>
-                <button type="button" onClick={() => setStep(1)} style={{ background:'none', border:'1px solid var(--border)', borderRadius:'6px', padding:'4px 10px', cursor:'pointer', fontSize:'0.85rem', color:'var(--text-muted)' }}>← Back</button>
-                <span className={`badge badge-${role}`}>{ROLES.find(r=>r.value===role)?.icon} {role}</span>
-              </div>
-
-              <div>
-                <label className="label">Full Name</label>
-                <input className="input" placeholder="Your full name" value={form.name} onChange={e=>set('name',e.target.value)} required />
-              </div>
-              <div>
-                <label className="label">Email</label>
-                <input className="input" type="email" placeholder="your@email.com" value={form.email} onChange={e=>set('email',e.target.value)} required />
-              </div>
-              <div>
-                <label className="label">Password</label>
-                <input className="input" type="password" placeholder="Min 6 characters" value={form.password} onChange={e=>set('password',e.target.value)} required minLength={6} />
-              </div>
-
-              {role === 'child' && <>
-                <div>
-                  <label className="label">Age</label>
-                  <input className="input" type="number" min="2" max="18" placeholder="Child's age" value={form.age} onChange={e=>set('age',e.target.value)} required />
-                </div>
-                <div>
-                  <label className="label">Parent's Email (optional)</label>
-                  <input className="input" type="email" placeholder="Parent account email to link" value={form.parentEmail} onChange={e=>set('parentEmail',e.target.value)} />
-                </div>
-              </>}
-
-              {role === 'therapist' && (
-                <div>
-                  <label className="label">Specialization</label>
-                  <select className="input" value={form.specialization} onChange={e=>set('specialization',e.target.value)}>
-                    <option value="">Select specialization</option>
-                    <option>ABA Therapy</option>
-                    <option>Speech Therapy</option>
-                    <option>Occupational Therapy</option>
-                    <option>Behavioral Therapy</option>
-                    <option>Play Therapy</option>
-                  </select>
-                </div>
-              )}
-
-              <button type="submit" className="btn btn-primary" style={{ width:'100%', justifyContent:'center' }} disabled={loading}>
-                {loading ? <><span className="spinner" style={{ width:18,height:18 }} /> Creating account...</> : 'Create Account ✨'}
-              </button>
-            </form>
-          )}
-
-          {mode === 'register' && step === 2 && (
-            <p style={{ marginTop:'16px', textAlign:'center', fontSize:'0.85rem', color:'var(--text-muted)' }}>
-              Already have an account?{' '}
-              <button onClick={resetToLogin} style={{ background:'none', border:'none', color:'var(--primary)', fontWeight:'700', cursor:'pointer', fontFamily:'inherit' }}>Sign In</button>
-            </p>
-          )}
+          ))}
         </div>
       </div>
     </div>
   );
 };
 
-export default AuthPage;
+/* ─── Role selector card component ────────────────────────────────────────── */
+const RoleCard = ({ role, selected, onSelect, title, desc, icon }) => (
+  <div
+    onClick={() => onSelect(role)}
+    style={{
+      flex: 1,
+      padding: "20px",
+      borderRadius: "14px",
+      border: `2px solid ${selected ? "#7c3aed" : "#e5e7eb"}`,
+      background: selected ? "rgba(124, 58, 237, 0.04)" : "#fafafa",
+      cursor: "pointer",
+      transition: "all 0.2s ease",
+      display: "flex",
+      flexDirection: "column",
+      gap: "8px",
+    }}
+  >
+    <div style={{ fontSize: "1.8rem" }}>{icon}</div>
+    <div style={{ fontWeight: "700", fontSize: "1rem", color: "#111827" }}>
+      {title}
+    </div>
+    <div style={{ fontSize: "0.82rem", color: "#6b7280", lineHeight: 1.4 }}>
+      {desc}
+    </div>
+  </div>
+);
+
+export default function AuthPage({ onLogin }) {
+  const { lang, setLang, toggleLang, t } = useLang();
+
+  // URL query param check (e.g. /login?mode=register)
+  const initialMode =
+    new URLSearchParams(window.location.search).get("mode") === "register"
+      ? "register"
+      : "login";
+
+  const [mode, setMode] = useState(initialMode); // 'login' | 'register'
+  const [step, setStep] = useState(1); // Step 1: select role (register), Step 2: details
+  const [role, setRole] = useState(""); // 'parent' | 'therapist'
+  const [loginRole, setLoginRole] = useState("parent"); // 'parent' | 'therapist' selector for login
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    phone: "",
+    specialization: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [showGoogleRolePicker, setShowGoogleRolePicker] = useState(false);
+  const [pendingGoogleRole, setPendingGoogleRole] = useState("");
+
+  const STATS = [
+    { value: "500+", label: t("hero_stat3_label") },
+    { value: "120+", label: t("nav_features") },
+    { value: "4.9★", label: t("nav_reviews") },
+  ];
+
+  const ROLES = [
+    {
+      value: "parent",
+      role: "parent",
+      icon: "👨‍👩‍👧",
+      title: t("auth_role_parent_title"),
+      label: t("auth_role_parent_title"),
+      desc: t("auth_role_parent_desc"),
+      color: "#7c3aed",
+      bg: "rgba(124, 58, 237, 0.04)",
+    },
+    {
+      value: "therapist",
+      role: "therapist",
+      icon: "🩺",
+      title: t("auth_role_therapist_title"),
+      label: t("auth_role_therapist_title"),
+      desc: t("auth_role_therapist_desc"),
+      color: "#0891b2",
+      bg: "rgba(8, 145, 178, 0.04)",
+    },
+  ];
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const switchMode = (m) => {
+    setMode(m);
+    setStep(1);
+    setRole("");
+    setError("");
+    setSuccess("");
+  };
+
+  /* ── Login with Email/Password ─────────────────────────────────────────── */
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    if (!form.email || !form.password) {
+      setError("Email and password are required.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Attempt Firebase login if available in background
+      try {
+        const result = await signInWithEmailAndPassword(
+          auth,
+          form.email.trim(),
+          form.password,
+        );
+        if (result && result.user && !result.user.emailVerified) {
+          await signOut(auth);
+        }
+      } catch (fbErr) {
+        console.warn("Firebase Auth notice:", fbErr.message);
+      }
+
+      const data = await loginUser(form.email.trim(), form.password, loginRole);
+      localStorage.setItem("auth_token", data.token);
+      localStorage.setItem("auth_user", JSON.stringify(data.user));
+      onLogin(data.user);
+    } catch (err) {
+      const msg = err.message || "";
+      const noAccount =
+        msg.toLowerCase().includes("no account") ||
+        msg.toLowerCase().includes("not found") ||
+        msg.toLowerCase().includes("does not exist") ||
+        msg.toLowerCase().includes("user not found");
+      if (noAccount) {
+        setError("__no_account__");
+      } else {
+        setError(msg || "Login failed. Please check your credentials.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* ── Register with Email/Password ─────────────────────────────────────────── */
+  const handleRegisterSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+
+    if (!form.email || form.password.length < 6) {
+      setError(
+        "A valid email and a password of at least 6 characters are required.",
+      );
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Create user in Firebase Auth first
+      try {
+        await createUserWithEmailAndPassword(
+          auth,
+          form.email.trim(),
+          form.password,
+        );
+      } catch (fbErr) {
+        if (fbErr.code === "auth/email-already-in-use") {
+          throw new Error("already registered");
+        }
+        console.warn("Firebase Auth registration issue:", fbErr.message);
+      }
+
+      const payload = {
+        role: role || "parent",
+        name: form.name.trim() || form.email.split("@")[0],
+        email: form.email.trim(),
+        password: form.password,
+        phone: form.phone ? form.phone.trim() : "",
+        specialization:
+          role === "therapist" ? form.specialization || "General" : "",
+      };
+
+      const data = await registerUser(payload);
+      localStorage.setItem("auth_token", data.token);
+      localStorage.setItem("auth_user", JSON.stringify(data.user));
+      setSuccess(
+        lang === "en"
+          ? "Account created successfully! Signing you in…"
+          : "ಖಾತೆಯನ್ನು ಯಶಸ್ವಿಯಾಗಿ ರಚಿಸಲಾಗಿದೆ! ಸೈನ್ ಇನ್ ಮಾಡಲಾಗುತ್ತಿದೆ…",
+      );
+      setTimeout(() => onLogin(data.user), 800);
+    } catch (err) {
+      const msg = err.message || "";
+      const isAlreadyRegistered =
+        msg.toLowerCase().includes("already registered") ||
+        msg.toLowerCase().includes("already exists") ||
+        msg.toLowerCase().includes("email already") ||
+        msg.includes("409");
+      if (isAlreadyRegistered) {
+        setMode("login");
+        setStep(1);
+        setRole("");
+        setSuccess("");
+        setError("Account with this email id exists, please login.");
+      } else {
+        setError(msg || "Failed to create account. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* ── 1-Click Demo Login ─────────────────────────────────────────────── */
+  const handleQuickDemoLogin = async (demoRole = loginRole) => {
+    setLoading(true);
+    setError("");
+    try {
+      const email =
+        demoRole === "therapist"
+          ? "ananya.sharma@autismassistant.com"
+          : "parent@test.com";
+      const password = "password123";
+      const data = await loginUser(email, password, demoRole);
+      localStorage.setItem("auth_token", data.token);
+      localStorage.setItem("auth_user", JSON.stringify(data.user));
+      setSuccess(
+        `Signed in as ${demoRole === "therapist" ? "Therapist (Dr. Ananya Sharma)" : "Demo Parent"}! Redirecting…`,
+      );
+      setTimeout(() => onLogin(data.user), 500);
+    } catch (err) {
+      setError(err.message || "Demo login failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* ── Google Sign In (Real Firebase Authentication) ───────────────────────── */
+  const doGoogleSignIn = async (selectedRole) => {
+    setGoogleLoading(true);
+    setError("");
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      provider.addScope("email");
+      provider.addScope("profile");
+      const result = await signInWithPopup(auth, provider);
+      const email = result.user.email;
+      const displayName =
+        result.user.displayName || (email ? email.split("@")[0] : "");
+
+      const roleToUse = selectedRole || role || "parent";
+      const data = await googleLogin(email, displayName, roleToUse, mode);
+      localStorage.setItem("auth_token", data.token);
+      localStorage.setItem("auth_user", JSON.stringify(data.user));
+      setSuccess("Signed in with Google! Redirecting…");
+      setTimeout(() => onLogin(data.user), 500);
+    } catch (err) {
+      console.warn("Firebase Google Sign In Notice:", err);
+      if (
+        err.code === "auth/popup-closed-by-user" ||
+        err.code === "auth/cancelled-popup-request"
+      ) {
+        setError("Google sign-in popup was closed before completing.");
+      } else if (err.code === "auth/popup-blocked") {
+        setError(
+          "Popup was blocked by your browser. Attempting redirect to Google…",
+        );
+        try {
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: "select_account" });
+          provider.addScope("email");
+          provider.addScope("profile");
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (redirErr) {
+          console.warn("Redirect failed:", redirErr);
+          setError(
+            "Google redirect was blocked. Please allow popups or use Email/Password login.",
+          );
+        }
+      } else if (
+        err.code === "auth/operation-not-allowed" ||
+        err.message?.includes("401") ||
+        err.message?.includes("malformed")
+      ) {
+        setError(
+          "Firebase Google OAuth notice: Please ensure in Firebase Console (Authentication > Sign-in method > Google) that Google provider has a 'Project support email' configured.",
+        );
+      } else {
+        setError(err.message || "Google sign-in failed. Please try again.");
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = () => {
+    setError("");
+    // On register tab, if no role selected yet → show role picker first
+    if (mode === "register" && !role) {
+      setShowGoogleRolePicker(true);
+      return;
+    }
+    doGoogleSignIn(role || "parent");
+  };
+
+  const handleGoogleRoleSelect = (selectedRole) => {
+    setShowGoogleRolePicker(false);
+    setPendingGoogleRole(selectedRole);
+    setRole(selectedRole);
+    doGoogleSignIn(selectedRole);
+  };
+
+  // Handle redirect sign-in result (if signInWithRedirect was used as a fallback)
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (!mounted) return;
+        if (result && result.user) {
+          setGoogleLoading(true);
+          const email = result.user.email;
+          const displayName =
+            result.user.displayName || (email ? email.split("@")[0] : "");
+          const roleToUse = role || (mode === "register" ? "parent" : "parent");
+          try {
+            const data = await googleLogin(email, displayName, roleToUse);
+            localStorage.setItem("auth_token", data.token);
+            localStorage.setItem("auth_user", JSON.stringify(data.user));
+            setSuccess("Signed in with Google! Redirecting…");
+            setTimeout(() => onLogin(data.user), 600);
+          } catch (err) {
+            console.warn("Error syncing Google user after redirect:", err);
+            setError(err.message || "Failed to sign in after redirect.");
+          }
+        }
+      } catch (err) {
+        // Not all environments or flows will return a redirect result.
+        console.warn(
+          "No redirect sign-in result or an error occurred:",
+          err?.message || err,
+        );
+      } finally {
+        if (mounted) setGoogleLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  /* ── Render ─────────────────────────────────────────────────────────────── */
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "linear-gradient(135deg, #f5f3ff 0%, #e0f2fe 100%)",
+        padding: "20px",
+        position: "relative",
+      }}
+    >
+      {/* Absolute Language Switcher */}
+      <button
+        onClick={toggleLang}
+        style={{
+          position: "absolute",
+          top: 20,
+          right: 20,
+          zIndex: 100,
+          padding: "8px 18px",
+          borderRadius: 50,
+          fontWeight: 700,
+          fontSize: ".85rem",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          border: "1.5px solid var(--primary)",
+          background: "white",
+          color: "var(--primary)",
+          boxShadow: "0 4px 12px rgba(99,102,241,0.1)",
+          transition: "all .3s",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.05)")}
+        onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+      >
+        🌐 {lang === "en" ? "ಕನ್ನಡ" : "EN"}
+      </button>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 420px) minmax(0, 480px)",
+          width: "100%",
+          maxWidth: "900px",
+          borderRadius: "24px",
+          overflow: "hidden",
+          boxShadow: "0 30px 80px rgba(109, 40, 217, 0.18)",
+          minHeight: "600px",
+        }}
+      >
+        {/* ── Left: graphic / branding ──────────────────────────────────── */}
+        <LeftPanel mode={mode} STATS={STATS} />
+
+        {/* ── Right: form ───────────────────────────────────────────────── */}
+        <div
+          style={{
+            background: "white",
+            padding: "44px 40px",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            overflowY: "auto",
+            position: "relative",
+          }}
+        >
+          {/* Tabs */}
+          <div
+            style={{
+              display: "flex",
+              background: "#f3f4f6",
+              borderRadius: "14px",
+              padding: "4px",
+              marginBottom: "28px",
+            }}
+          >
+            {["login", "register"].map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => switchMode(m)}
+                style={{
+                  flex: 1,
+                  padding: "11px",
+                  border: "none",
+                  borderRadius: "11px",
+                  fontFamily: "inherit",
+                  fontWeight: "700",
+                  fontSize: "0.88rem",
+                  cursor: "pointer",
+                  transition: "all 0.25s",
+                  background: mode === m ? "white" : "transparent",
+                  color: mode === m ? "#6d28d9" : "#9ca3af",
+                  boxShadow: mode === m ? "0 2px 10px rgba(0,0,0,0.1)" : "none",
+                }}
+              >
+                {m === "login" ? t("auth_sign_in") : t("auth_create_account")}
+              </button>
+            ))}
+          </div>
+
+          {/* Alerts */}
+          {error && error === "__already_registered__" ? (
+            <div
+              style={{
+                background: "#fffbeb",
+                border: "1px solid #fde68a",
+                color: "#92400e",
+                borderRadius: "10px",
+                padding: "14px 16px",
+                marginBottom: "16px",
+                fontSize: "0.875rem",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "8px",
+                  marginBottom: "10px",
+                }}
+              >
+                <span>📧</span>
+                <span>
+                  <strong>This email is already registered.</strong> You already
+                  have an account with us!
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => switchMode("login")}
+                style={{
+                  width: "100%",
+                  padding: "9px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
+                  color: "white",
+                  fontWeight: "700",
+                  fontSize: "0.88rem",
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                }}
+              >
+                Sign In to your existing account →
+              </button>
+            </div>
+          ) : error && error === "__no_account__" ? (
+            <div
+              style={{
+                background: "#f0fdf4",
+                border: "1px solid #86efac",
+                color: "#14532d",
+                borderRadius: "10px",
+                padding: "14px 16px",
+                marginBottom: "16px",
+                fontSize: "0.875rem",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "8px",
+                  marginBottom: "10px",
+                }}
+              >
+                <span>👤</span>
+                <span>
+                  <strong>No account found with this email.</strong> You need to
+                  create an account first.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => switchMode("register")}
+                style={{
+                  width: "100%",
+                  padding: "9px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
+                  color: "white",
+                  fontWeight: "700",
+                  fontSize: "0.88rem",
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                }}
+              >
+                Create a free account →
+              </button>
+            </div>
+          ) : error ? (
+            <div
+              style={{
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                color: "#b91c1c",
+                borderRadius: "10px",
+                padding: "12px 16px",
+                marginBottom: "16px",
+                fontSize: "0.875rem",
+                display: "flex",
+                alignItems: "flex-start",
+                gap: "8px",
+              }}
+            >
+              <span>⚠️</span> {error}
+            </div>
+          ) : null}
+          {success && (
+            <div
+              style={{
+                background: "#f0fdf4",
+                border: "1px solid #bbf7d0",
+                color: "#166534",
+                borderRadius: "10px",
+                padding: "12px 16px",
+                marginBottom: "16px",
+                fontSize: "0.875rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <span>✅</span> {success}
+            </div>
+          )}
+
+          {/* ── SIGN IN ─────────────────────────────────────────────────── */}
+          {mode === "login" && (
+            <>
+              <div style={{ marginBottom: "20px" }}>
+                {/* Role Switcher Tabs */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "10px",
+                    marginBottom: "16px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setLoginRole("parent")}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: "12px",
+                      border:
+                        loginRole === "parent"
+                          ? "2px solid #7c3aed"
+                          : "1.5px solid #e5e7eb",
+                      background:
+                        loginRole === "parent"
+                          ? "rgba(124, 58, 237, 0.08)"
+                          : "#fafafa",
+                      color: loginRole === "parent" ? "#6d28d9" : "#4b5563",
+                      fontWeight: "700",
+                      fontSize: "0.88rem",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "8px",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    <span>👨‍👩‍👧</span> Parent Sign In
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLoginRole("therapist")}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: "12px",
+                      border:
+                        loginRole === "therapist"
+                          ? "2px solid #0891b2"
+                          : "1.5px solid #e5e7eb",
+                      background:
+                        loginRole === "therapist"
+                          ? "rgba(8, 145, 178, 0.08)"
+                          : "#fafafa",
+                      color: loginRole === "therapist" ? "#0e7490" : "#4b5563",
+                      fontWeight: "700",
+                      fontSize: "0.88rem",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "8px",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    <span>🩺</span> Therapist Sign In
+                  </button>
+                </div>
+
+                <h2
+                  style={{
+                    fontSize: "1.4rem",
+                    fontWeight: "800",
+                    color: "#111827",
+                    marginBottom: "4px",
+                  }}
+                >
+                  {loginRole === "therapist"
+                    ? "Therapist Portal Login 🩺"
+                    : "Parent Portal Login 👨‍👩‍👧"}
+                </h2>
+                <p style={{ color: "#6b7280", fontSize: "0.86rem" }}>
+                  {loginRole === "therapist"
+                    ? "Sign in as Therapist to access assigned age-group children, review Q-CHAT-10 assessments, and send clinical guidance."
+                    : "Sign in as Parent to access child's dashboard, daily activity streak, activities, and progress summary."}
+                </p>
+              </div>
+
+              <form
+                onSubmit={handleLogin}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "16px",
+                }}
+              >
+                <Field
+                  label={t("auth_email")}
+                  id="login-email"
+                  type="email"
+                  placeholder="your@email.com"
+                  value={form.email}
+                  onChange={(e) => set("email", e.target.value)}
+                  required
+                />
+                <Field
+                  label={t("auth_password")}
+                  id="login-password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={form.password}
+                  onChange={(e) => set("password", e.target.value)}
+                  required
+                />
+                <button
+                  id="login-submit"
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    padding: "12px",
+                    borderRadius: "12px",
+                    border: "none",
+                    cursor: loading ? "not-allowed" : "pointer",
+                    background: loading
+                      ? "#c4b5fd"
+                      : "linear-gradient(135deg, #7c3aed, #4f46e5)",
+                    color: "white",
+                    fontWeight: "700",
+                    fontSize: "0.95rem",
+                    fontFamily: "inherit",
+                    transition: "all 0.2s",
+                    marginTop: "4px",
+                    boxShadow: loading
+                      ? "none"
+                      : "0 4px 15px rgba(124,58,237,0.4)",
+                  }}
+                >
+                  {loading ? t("auth_signing_in") : t("auth_signing_btn")}
+                </button>
+
+                {/* 1-Click Quick Demo Login */}
+                <div style={{ marginTop: "4px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (loginRole === "therapist") {
+                        setMode("register");
+                        setStep(1);
+                        setRole("therapist");
+                      } else {
+                        handleQuickDemoLogin("parent");
+                      }
+                    }}
+                    disabled={loading}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: "10px",
+                      border:
+                        loginRole === "therapist"
+                          ? "1px dashed #0891b2"
+                          : "1px dashed #7c3aed",
+                      background:
+                        loginRole === "therapist"
+                          ? "rgba(8, 145, 178, 0.05)"
+                          : "rgba(124, 58, 237, 0.05)",
+                      color: loginRole === "therapist" ? "#0e7490" : "#6d28d9",
+                      fontWeight: "700",
+                      fontSize: "0.8rem",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {loginRole === "therapist"
+                      ? "✨ Register as a Therapist"
+                      : "⚡ Quick Sign In as Demo Parent"}
+                  </button>
+                </div>
+              </form>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  margin: "20px 0",
+                }}
+              >
+                <div
+                  style={{ flex: 1, height: "1px", background: "#e5e7eb" }}
+                ></div>
+                <div
+                  style={{
+                    padding: "0 10px",
+                    color: "#6b7280",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  or
+                </div>
+                <div
+                  style={{ flex: 1, height: "1px", background: "#e5e7eb" }}
+                ></div>
+              </div>
+
+              <button
+                onClick={handleGoogleSignIn}
+                type="button"
+                disabled={googleLoading}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: "12px",
+                  border: "1.5px solid #e5e7eb",
+                  background: googleLoading ? "#f9fafb" : "white",
+                  color: "#374151",
+                  fontWeight: "600",
+                  fontSize: "0.95rem",
+                  fontFamily: "inherit",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "10px",
+                  cursor: googleLoading ? "not-allowed" : "pointer",
+                  transition: "background 0.2s",
+                  opacity: googleLoading ? 0.7 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!googleLoading)
+                    e.currentTarget.style.background = "#f9fafb";
+                }}
+                onMouseLeave={(e) => {
+                  if (!googleLoading)
+                    e.currentTarget.style.background = "white";
+                }}
+              >
+                <img
+                  src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                  alt="Google"
+                  style={{ width: "20px" }}
+                />
+                {googleLoading ? "Connecting…" : "Continue with Google"}
+              </button>
+
+              <p
+                style={{
+                  textAlign: "center",
+                  marginTop: "20px",
+                  fontSize: "0.85rem",
+                  color: "#9ca3af",
+                }}
+              >
+                {t("auth_no_account")}{" "}
+                <button
+                  onClick={() => switchMode("register")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#7c3aed",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: "inherit",
+                  }}
+                >
+                  {t("auth_create_one_free")}
+                </button>
+              </p>
+            </>
+          )}
+
+          {/* ── REGISTER STEP 1: Pick role ─────────────────────────────── */}
+          {mode === "register" && step === 1 && (
+            <>
+              <div style={{ marginBottom: "20px" }}>
+                <h2
+                  style={{
+                    fontSize: "1.5rem",
+                    fontWeight: "800",
+                    color: "#111827",
+                    marginBottom: "4px",
+                  }}
+                >
+                  {t("auth_role_title")}
+                </h2>
+                <p style={{ color: "#6b7280", fontSize: "0.88rem" }}>
+                  {t("auth_who_joining")}
+                </p>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "14px",
+                  marginBottom: "24px",
+                }}
+              >
+                {ROLES.map((r) => (
+                  <button
+                    key={r.value}
+                    type="button"
+                    onClick={() => {
+                      setRole(r.value);
+                      setStep(2);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "16px",
+                      padding: "18px",
+                      borderRadius: "14px",
+                      border: `2px solid ${role === r.value ? r.color : "#e5e7eb"}`,
+                      background: role === r.value ? r.bg : "#fafafa",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontFamily: "inherit",
+                      transition: "all 0.2s",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = r.color;
+                      e.currentTarget.style.background = r.bg;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor =
+                        role === r.value ? r.color : "#e5e7eb";
+                      e.currentTarget.style.background =
+                        role === r.value ? r.bg : "#fafafa";
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "2rem",
+                        width: "48px",
+                        height: "48px",
+                        borderRadius: "12px",
+                        background: r.bg,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {r.icon}
+                    </span>
+                    <div>
+                      <div
+                        style={{
+                          fontWeight: "700",
+                          color: "#111827",
+                          fontSize: "0.95rem",
+                          marginBottom: "4px",
+                        }}
+                      >
+                        {r.label}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.8rem",
+                          color: "#6b7280",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {r.desc}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        marginLeft: "auto",
+                        color: "#d1d5db",
+                        fontSize: "1.2rem",
+                        alignSelf: "center",
+                      }}
+                    >
+                      ›
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div
+                style={{
+                  background: "#f9fafb",
+                  borderRadius: "10px",
+                  padding: "12px 14px",
+                  fontSize: "0.8rem",
+                  color: "#6b7280",
+                  lineHeight: 1.6,
+                  borderLeft: "3px solid #7c3aed",
+                }}
+              >
+                {t("auth_child_notice")}
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  margin: "16px 0 4px",
+                }}
+              >
+                <div
+                  style={{ flex: 1, height: "1px", background: "#e5e7eb" }}
+                ></div>
+                <div
+                  style={{
+                    padding: "0 10px",
+                    color: "#6b7280",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  or sign up with
+                </div>
+                <div
+                  style={{ flex: 1, height: "1px", background: "#e5e7eb" }}
+                ></div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={googleLoading}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: "12px",
+                  border: "1.5px solid #e5e7eb",
+                  background: googleLoading ? "#f9fafb" : "white",
+                  color: "#374151",
+                  fontWeight: "600",
+                  fontSize: "0.95rem",
+                  fontFamily: "inherit",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "10px",
+                  cursor: googleLoading ? "not-allowed" : "pointer",
+                  transition: "background 0.2s",
+                  opacity: googleLoading ? 0.7 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!googleLoading)
+                    e.currentTarget.style.background = "#f9fafb";
+                }}
+                onMouseLeave={(e) => {
+                  if (!googleLoading)
+                    e.currentTarget.style.background = "white";
+                }}
+              >
+                <img
+                  src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                  alt="Google"
+                  style={{ width: "20px" }}
+                />
+                {googleLoading ? "Connecting…" : "Continue with Google"}
+              </button>
+
+              <p
+                style={{
+                  textAlign: "center",
+                  marginTop: "16px",
+                  fontSize: "0.85rem",
+                  color: "#9ca3af",
+                }}
+              >
+                {t("auth_already_registered")}{" "}
+                <button
+                  onClick={() => switchMode("login")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#7c3aed",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: "inherit",
+                  }}
+                >
+                  {t("auth_sign_in")}
+                </button>
+              </p>
+            </>
+          )}
+
+          {/* ── REGISTER STEP 2: Form ──────────────────────────────────── */}
+          {mode === "register" && step === 2 && (
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  marginBottom: "20px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep(1);
+                    setError("");
+                  }}
+                  style={{
+                    background: "none",
+                    border: "1.5px solid #e5e7eb",
+                    borderRadius: "8px",
+                    padding: "5px 12px",
+                    cursor: "pointer",
+                    fontSize: "0.82rem",
+                    color: "#6b7280",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {t("auth_back")}
+                </button>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "0.8rem",
+                    background: ROLES.find((r) => r.value === role)?.bg,
+                    color: ROLES.find((r) => r.value === role)?.color,
+                    padding: "4px 12px",
+                    borderRadius: "20px",
+                    fontWeight: "700",
+                  }}
+                >
+                  {ROLES.find((r) => r.value === role)?.icon}{" "}
+                  {role === "parent"
+                    ? t("auth_role_parent")
+                    : t("auth_role_therapist")}
+                </span>
+              </div>
+
+              <h2
+                style={{
+                  fontSize: "1.4rem",
+                  fontWeight: "800",
+                  color: "#111827",
+                  marginBottom: "4px",
+                }}
+              >
+                {t("auth_complete_profile")}
+              </h2>
+              <p
+                style={{
+                  color: "#6b7280",
+                  fontSize: "0.85rem",
+                  marginBottom: "20px",
+                }}
+              >
+                {t("auth_fill_details")}
+              </p>
+
+              <form
+                onSubmit={handleRegisterSubmit}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "14px",
+                }}
+              >
+                <Field
+                  label={t("auth_full_name")}
+                  id="reg-name"
+                  placeholder="e.g. Sarah Johnson"
+                  value={form.name}
+                  onChange={(e) => set("name", e.target.value)}
+                  required
+                />
+
+                <Field
+                  label={t("auth_email")}
+                  id="reg-email"
+                  type="email"
+                  placeholder="name@example.com"
+                  value={form.email}
+                  onChange={(e) => set("email", e.target.value)}
+                  required
+                />
+
+                <Field
+                  label={t("auth_password")}
+                  id="reg-password"
+                  type="password"
+                  placeholder="Minimum 6 characters"
+                  value={form.password}
+                  onChange={(e) => set("password", e.target.value)}
+                  required
+                  minLength={6}
+                />
+
+                {role === "therapist" && (
+                  <Field label={t("auth_specialization")} id="reg-spec">
+                    <select
+                      id="reg-spec"
+                      value={form.specialization}
+                      onChange={(e) => set("specialization", e.target.value)}
+                      style={{
+                        padding: "10px 14px",
+                        borderRadius: "10px",
+                        border: "1.5px solid #e5e7eb",
+                        fontSize: "0.93rem",
+                        fontFamily: "inherit",
+                        outline: "none",
+                        background: "#fafafa",
+                        color: "#111827",
+                        transition: "border-color 0.2s",
+                        cursor: "pointer",
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = "#0891b2")}
+                      onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")}
+                    >
+                      <option value="">{t("auth_select_spec")}</option>
+                      <option value="ABA Therapy">ABA Therapy</option>
+                      <option value="Speech Therapy">
+                        Speech & Language Therapy
+                      </option>
+                      <option value="Occupational Therapy">
+                        Occupational Therapy
+                      </option>
+                      <option value="Behavioral Therapy">
+                        Behavioral Therapy
+                      </option>
+                      <option value="Play Therapy">
+                        Play & Developmental Therapy
+                      </option>
+                    </select>
+                  </Field>
+                )}
+
+                <button
+                  id="register-submit"
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    padding: "13px",
+                    borderRadius: "12px",
+                    border: "none",
+                    cursor: loading ? "not-allowed" : "pointer",
+                    background: loading
+                      ? "#c4b5fd"
+                      : "linear-gradient(135deg, #7c3aed, #4f46e5)",
+                    color: "white",
+                    fontWeight: "700",
+                    fontSize: "0.95rem",
+                    fontFamily: "inherit",
+                    transition: "all 0.2s",
+                    marginTop: "6px",
+                    boxShadow: loading
+                      ? "none"
+                      : "0 4px 15px rgba(124,58,237,0.4)",
+                  }}
+                >
+                  {loading ? t("auth_creating_acct") : t("auth_create_btn")}
+                </button>
+              </form>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  margin: "20px 0",
+                }}
+              >
+                <div
+                  style={{ flex: 1, height: "1px", background: "#e5e7eb" }}
+                ></div>
+                <div
+                  style={{
+                    padding: "0 10px",
+                    color: "#6b7280",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  or
+                </div>
+                <div
+                  style={{ flex: 1, height: "1px", background: "#e5e7eb" }}
+                ></div>
+              </div>
+
+              <button
+                onClick={handleGoogleSignIn}
+                type="button"
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: "12px",
+                  border: "1.5px solid #e5e7eb",
+                  background: googleLoading ? "#f9fafb" : "white",
+                  color: "#374151",
+                  fontWeight: "600",
+                  fontSize: "0.95rem",
+                  fontFamily: "inherit",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "10px",
+                  cursor: googleLoading ? "not-allowed" : "pointer",
+                  transition: "background 0.2s",
+                  opacity: googleLoading ? 0.7 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!googleLoading)
+                    e.currentTarget.style.background = "#f9fafb";
+                }}
+                onMouseLeave={(e) => {
+                  if (!googleLoading)
+                    e.currentTarget.style.background = "white";
+                }}
+              >
+                <img
+                  src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                  alt="Google"
+                  style={{ width: "20px" }}
+                />
+                {googleLoading ? "Connecting…" : "Continue with Google"}
+              </button>
+
+              <p
+                style={{
+                  textAlign: "center",
+                  marginTop: "18px",
+                  fontSize: "0.82rem",
+                  color: "#9ca3af",
+                }}
+              >
+                {t("auth_signup_agree")}
+              </p>
+
+              <p
+                style={{
+                  textAlign: "center",
+                  marginTop: "8px",
+                  fontSize: "0.85rem",
+                  color: "#9ca3af",
+                }}
+              >
+                {t("auth_already_registered")}{" "}
+                <button
+                  onClick={() => switchMode("login")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#7c3aed",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: "inherit",
+                  }}
+                >
+                  {t("auth_sign_in")}
+                </button>
+              </p>
+            </>
+          )}
+
+          {/* ── OTP VERIFICATION MODAL OVERLAY (Removed) ──────────────────────────── */}
+        </div>
+      </div>
+
+      {/* ── Google Role Picker Modal ──────────────────────────────────────── */}
+      {showGoogleRolePicker && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.5)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onClick={() => setShowGoogleRolePicker(false)}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: "20px",
+              padding: "36px 32px",
+              maxWidth: "440px",
+              width: "100%",
+              boxShadow: "0 30px 80px rgba(0,0,0,0.25)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                marginBottom: "8px",
+              }}
+            >
+              <img
+                src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                alt="Google"
+                style={{ width: "24px" }}
+              />
+              <h3
+                style={{
+                  fontSize: "1.2rem",
+                  fontWeight: "800",
+                  color: "#111827",
+                  margin: 0,
+                }}
+              >
+                One quick step before Google sign-in
+              </h3>
+            </div>
+            <p
+              style={{
+                color: "#6b7280",
+                fontSize: "0.87rem",
+                marginBottom: "24px",
+                lineHeight: 1.5,
+              }}
+            >
+              Who are you? Choose your role so we can set up your account
+              correctly.
+            </p>
+
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+            >
+              {ROLES.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => handleGoogleRoleSelect(r.value)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "14px",
+                    padding: "16px 18px",
+                    borderRadius: "14px",
+                    border: `2px solid ${pendingGoogleRole === r.value ? r.color : "#e5e7eb"}`,
+                    background:
+                      pendingGoogleRole === r.value ? r.bg : "#fafafa",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    fontFamily: "inherit",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = r.color;
+                    e.currentTarget.style.background = r.bg;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor =
+                      pendingGoogleRole === r.value ? r.color : "#e5e7eb";
+                    e.currentTarget.style.background =
+                      pendingGoogleRole === r.value ? r.bg : "#fafafa";
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "1.8rem",
+                      width: "44px",
+                      height: "44px",
+                      borderRadius: "12px",
+                      background: r.bg,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {r.icon}
+                  </span>
+                  <div>
+                    <div
+                      style={{
+                        fontWeight: "700",
+                        color: "#111827",
+                        fontSize: "0.95rem",
+                        marginBottom: "2px",
+                      }}
+                    >
+                      {r.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.78rem",
+                        color: "#6b7280",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {r.desc}
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      marginLeft: "auto",
+                      color: "#d1d5db",
+                      fontSize: "1.2rem",
+                    }}
+                  >
+                    ›
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowGoogleRolePicker(false)}
+              style={{
+                width: "100%",
+                marginTop: "16px",
+                padding: "10px",
+                background: "none",
+                border: "1.5px solid #e5e7eb",
+                borderRadius: "10px",
+                color: "#6b7280",
+                fontWeight: "600",
+                fontSize: "0.87rem",
+                fontFamily: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Google Loading Overlay ────────────────────────────────────────── */}
+      {googleLoading && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 999,
+            background: "rgba(255,255,255,0.8)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "16px",
+          }}
+        >
+          <div
+            style={{
+              width: "48px",
+              height: "48px",
+              border: "4px solid #e5e7eb",
+              borderTop: "4px solid #7c3aed",
+              borderRadius: "50%",
+              animation: "spin 0.8s linear infinite",
+            }}
+          />
+          <p
+            style={{ color: "#6b7280", fontWeight: "600", fontSize: "0.95rem" }}
+          >
+            Connecting with Google…
+          </p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+    </div>
+  );
+}
